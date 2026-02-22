@@ -12,11 +12,11 @@ class UnifiedMultimodalModel(PreTrainedModel):
         # Initialize VLM (Qwen3-VL-4B-Instruct)
         # Note: In a real scenario, you might load these from sub-configs or paths
         # For packaging, we assume the weights are stored in the same repo or downloaded
-        vlm_cfg = AutoConfig.from_dict(config.vlm_config) if config.vlm_config else None
+        vlm_cfg = AutoConfig.for_model(**config.vlm_config) if config.vlm_config else None
         self.vlm = AutoModelForCausalLM.from_config(vlm_cfg) if vlm_cfg else None
         
         # Initialize LLM (gpt-oss-20b)
-        llm_cfg = AutoConfig.from_dict(config.llm_config) if config.llm_config else None
+        llm_cfg = AutoConfig.for_model(**config.llm_config) if config.llm_config else None
         self.llm = AutoModelForCausalLM.from_config(llm_cfg) if llm_cfg else None
         
         self.vlm_system_prompt = config.vlm_system_prompt
