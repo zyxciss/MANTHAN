@@ -1,8 +1,8 @@
 import json
 import os
+import shutil
 import torch
 import torch.nn as nn
-from safetensors.torch import save_file, load_file
 from transformers import AutoModelForCausalLM, AutoModel, AutoProcessor, AutoTokenizer, AutoConfig
 from configuration_unified import UnifiedMultimodalConfig
 
@@ -10,27 +10,30 @@ from configuration_unified import UnifiedMultimodalConfig
 class UnifiedMultimodalModel(nn.Module):
     """
     A unified multimodal model that wraps a VLM and an LLM as a single nn.Module.
-    
+
     Externally it behaves as one model with:
-      - A single combined state_dict
-      - A single .safetensors checkpoint
+      - A single model repository
       - A single generate() call
-    
+      - No visible intermediate steps
+
     Internally it runs a two-stage pipeline:
       Stage 1: VLM (Qwen3-VL-4B) converts image -> structured text
       Stage 2: LLM (gpt-oss-20b) reasons over structured text + user prompt
+
+    The sub-models are stored in their ORIGINAL formats (including MXFP4
+    quantization) to avoid weight bloat from dequantization.
     """
 
     def __init__(self, vlm=None, llm=None, config=None):
         super().__init__()
         self.config = config or UnifiedMultimodalConfig()
-        # Register sub-models as submodules so their params appear in state_dict
         self.vlm = vlm
         self.llm = llm
+        self._vlm_processor = None
+        self._llm_tokenizer = None
 
     @property
     def device(self):
-        """Return device of the first parameter found."""
         try:
             return next(self.parameters()).device
         except StopIteration:
@@ -40,46 +43,58 @@ class UnifiedMultimodalModel(nn.Module):
     def vlm_system_prompt(self):
         return self.config.vlm_system_prompt
 
-    # ─── Save / Load (combined single checkpoint) ───────────────────────
+    # ─── Save / Load ─────────────────────────────────────────────────────
+    #
+    # Strategy: save each sub-model in its native format (preserving MXFP4
+    # quantization for gpt-oss-20b) inside subdirectories of a single repo.
+    # A top-level config.json ties everything together.
+    #
+    # Repo layout:
+    #   my-unified-model/
+    #     config.json              <- unified config
+    #     vlm/                     <- VLM weights + config (BF16, ~8GB)
+    #     llm/                     <- LLM weights + config (MXFP4, ~12GB)
+    #     vlm_processor/           <- VLM processor files
+    #     llm_tokenizer/           <- LLM tokenizer files
 
     def save_pretrained(self, save_directory):
-        """
-        Save the unified model as a single artifact:
-          - config.json           (unified config with both sub-model configs)
-          - model.safetensors     (combined state_dict of vlm + llm)
-        """
+        """Save the unified model preserving original weight formats."""
         os.makedirs(save_directory, exist_ok=True)
 
-        # 1. Save config
+        # 1. Save unified config
         config_path = os.path.join(save_directory, "config.json")
         with open(config_path, "w") as f:
-            json.dump({
-                "model_type": self.config.model_type,
-                "vlm_config": self.config.vlm_config,
-                "llm_config": self.config.llm_config,
-                "vlm_system_prompt": self.config.vlm_system_prompt,
-            }, f, indent=2)
+            json.dump(
+                {
+                    "model_type": self.config.model_type,
+                    "vlm_config": self.config.vlm_config,
+                    "llm_config": self.config.llm_config,
+                    "vlm_system_prompt": self.config.vlm_system_prompt,
+                },
+                f,
+                indent=2,
+            )
 
-        # 2. Collect the full state_dict (vlm.* + llm.* keys)
-        #    Move everything to CPU for serialisation
-        state_dict = {k: v.cpu().contiguous() for k, v in self.state_dict().items()}
+        # 2. Save VLM in its native format
+        vlm_dir = os.path.join(save_directory, "vlm")
+        print(f"Saving VLM to {vlm_dir} ...")
+        self.vlm.save_pretrained(vlm_dir, safe_serialization=True)
 
-        # 3. Save as a single safetensors file
-        safetensors_path = os.path.join(save_directory, "model.safetensors")
-        print(f"Saving {len(state_dict)} tensors to {safetensors_path} ...")
-        save_file(state_dict, safetensors_path)
+        # 3. Save LLM in its native format (preserves MXFP4 quantization)
+        llm_dir = os.path.join(save_directory, "llm")
+        print(f"Saving LLM to {llm_dir} ...")
+        self.llm.save_pretrained(llm_dir, safe_serialization=True)
 
         print(f"Saved unified model to {save_directory}")
 
     @classmethod
     def from_pretrained(cls, save_directory, dtype=torch.bfloat16, device_map="auto"):
         """
-        Load the unified model from a single repository:
-          1. Read config.json to find sub-model architectures
-          2. Instantiate empty sub-models from their configs
-          3. Load the combined state_dict from model.safetensors
+        Load the unified model from a single repository.
+        Each sub-model is loaded with its own from_pretrained, which
+        correctly handles quantized formats (MXFP4) without dequantizing.
         """
-        # 1. Load config
+        # 1. Load unified config
         config_path = os.path.join(save_directory, "config.json")
         with open(config_path, "r") as f:
             raw = json.load(f)
@@ -90,32 +105,28 @@ class UnifiedMultimodalModel(nn.Module):
             vlm_system_prompt=raw.get("vlm_system_prompt", ""),
         )
 
-        # 2. Create empty sub-models from their configs (no weights yet)
-        vlm_cfg = AutoConfig.for_model(**config.vlm_config)
-        vlm_cfg.torch_dtype = dtype
+        # 2. Load VLM from its subdirectory (BF16)
+        vlm_dir = os.path.join(save_directory, "vlm")
+        print(f"Loading VLM from {vlm_dir} ...")
         try:
-            vlm = AutoModelForCausalLM.from_config(vlm_cfg)
+            vlm = AutoModelForCausalLM.from_pretrained(
+                vlm_dir, torch_dtype=dtype, device_map=device_map
+            )
         except ValueError:
-            vlm = AutoModel.from_config(vlm_cfg)
+            vlm = AutoModel.from_pretrained(
+                vlm_dir, torch_dtype=dtype, device_map=device_map
+            )
 
-        llm_cfg = AutoConfig.for_model(**config.llm_config)
-        llm_cfg.torch_dtype = dtype
-        llm = AutoModelForCausalLM.from_config(llm_cfg)
+        # 3. Load LLM from its subdirectory (preserves MXFP4 if Triton available,
+        #    otherwise falls back to BF16 dequant automatically)
+        llm_dir = os.path.join(save_directory, "llm")
+        print(f"Loading LLM from {llm_dir} ...")
+        llm = AutoModelForCausalLM.from_pretrained(
+            llm_dir, torch_dtype=dtype, device_map=device_map
+        )
 
-        # 3. Build the unified wrapper (still on CPU, random weights)
+        # 4. Build the unified wrapper
         model = cls(vlm=vlm, llm=llm, config=config)
-
-        # 4. Load the combined safetensors checkpoint
-        safetensors_path = os.path.join(save_directory, "model.safetensors")
-        print(f"Loading weights from {safetensors_path} ...")
-        state_dict = load_file(safetensors_path)
-        model.load_state_dict(state_dict, strict=False)
-
-        # 5. Cast to desired dtype and move to device
-        model = model.to(dtype=dtype)
-        if device_map == "auto" and torch.cuda.is_available():
-            model = model.cuda()
-        
         model.eval()
         print("Unified model loaded successfully.")
         return model
