@@ -27,6 +27,16 @@ class UnifiedMultimodalModel(PreTrainedModel):
         
         self.vlm_system_prompt = config.vlm_system_prompt
 
+    @property
+    def all_tied_weights_keys(self):
+        # Return an empty list or the tied weights of sub-modules if any
+        keys = []
+        if self.vlm and hasattr(self.vlm, "all_tied_weights_keys"):
+            keys.extend([f"vlm.{k}" for k in self.vlm.all_tied_weights_keys])
+        if self.llm and hasattr(self.llm, "all_tied_weights_keys"):
+            keys.extend([f"llm.{k}" for k in self.llm.all_tied_weights_keys])
+        return keys
+
     def forward(self, *args, **kwargs):
         # Forward pass is usually for training, which we aren't doing.
         # We can implement a dummy forward or raise NotImplementedError
