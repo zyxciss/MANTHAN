@@ -4,7 +4,14 @@ import shutil
 import torch
 import torch.nn as nn
 from safetensors import safe_open
-from transformers import AutoModelForCausalLM, AutoModel, AutoProcessor, AutoTokenizer, AutoConfig
+from transformers import (
+    AutoModelForCausalLM,
+    AutoModel,
+    AutoProcessor,
+    AutoTokenizer,
+    AutoConfig,
+    Qwen3VLForConditionalGeneration,
+)
 from configuration_unified import ManthanM1Config
 
 
@@ -143,16 +150,13 @@ class ManthanM1(nn.Module):
         )
 
         # 2. Load VLM from its subdirectory (BF16)
+        #    Must use Qwen3VLForConditionalGeneration (not AutoModel/AutoModelForCausalLM)
+        #    because this is a vision-language model that needs generate().
         vlm_dir = os.path.join(save_directory, "vlm")
         print(f"Loading VLM from {vlm_dir} ...")
-        try:
-            vlm = AutoModelForCausalLM.from_pretrained(
-                vlm_dir, torch_dtype=dtype, device_map=device_map
-            )
-        except ValueError:
-            vlm = AutoModel.from_pretrained(
-                vlm_dir, torch_dtype=dtype, device_map=device_map
-            )
+        vlm = Qwen3VLForConditionalGeneration.from_pretrained(
+            vlm_dir, dtype=dtype, device_map=device_map
+        )
 
         # 3. Load LLM from its subdirectory (preserves MXFP4 if Triton available,
         #    otherwise falls back to BF16 dequant automatically)
