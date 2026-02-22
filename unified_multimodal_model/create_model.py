@@ -8,6 +8,10 @@ def create_and_save_unified_model(save_directory):
     vlm_model_id = "Qwen/Qwen3-VL-4B-Instruct"
     llm_model_id = "openai/gpt-oss-20b"
     
+    # Use GPU if available
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Using device: {device}")
+    
     vlm_config = AutoConfig.from_pretrained(vlm_model_id)
     llm_config = AutoConfig.from_pretrained(llm_model_id)
     
@@ -26,12 +30,12 @@ def create_and_save_unified_model(save_directory):
     # For a 20B model, this requires significant RAM.
     print("Loading VLM weights...")
     try:
-        unified_model.vlm = AutoModelForCausalLM.from_pretrained(vlm_model_id, torch_dtype=torch.bfloat16)
+        unified_model.vlm = AutoModelForCausalLM.from_pretrained(vlm_model_id, torch_dtype=torch.bfloat16, device_map="auto")
     except ValueError:
-        unified_model.vlm = AutoModel.from_pretrained(vlm_model_id, torch_dtype=torch.bfloat16)
+        unified_model.vlm = AutoModel.from_pretrained(vlm_model_id, torch_dtype=torch.bfloat16, device_map="auto")
     
     print("Loading LLM weights...")
-    unified_model.llm = AutoModelForCausalLM.from_pretrained(llm_model_id, torch_dtype=torch.bfloat16)
+    unified_model.llm = AutoModelForCausalLM.from_pretrained(llm_model_id, torch_dtype=torch.bfloat16, device_map="auto")
     
     # 5. Save the unified model
     # This will save the combined state_dict as safetensors (default in newer transformers)
@@ -51,4 +55,4 @@ def create_and_save_unified_model(save_directory):
     print("Done!")
 
 if __name__ == "__main__":
-    create_and_save_unified_model("./my-unified-model")
+    create_and_save_unified_model("/tmp/my-unified-model")
