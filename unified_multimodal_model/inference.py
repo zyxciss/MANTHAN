@@ -1,38 +1,39 @@
 import torch
-from transformers import AutoConfig, AutoModelForCausalLM, AutoProcessor, AutoTokenizer
-from configuration_unified import UnifiedMultimodalConfig
+from transformers import AutoProcessor, AutoTokenizer
 from modeling_unified import UnifiedMultimodalModel
 
+
 def load_and_run_unified_model(model_path, image_path, prompt):
-    # 1. Load the unified model directly using the custom class
+    # 1. Load the unified model (reads config.json + model.safetensors)
     print(f"Loading unified model from {model_path}...")
     model = UnifiedMultimodalModel.from_pretrained(
-        model_path, 
-        torch_dtype=torch.bfloat16, 
+        model_path,
+        dtype=torch.bfloat16,
         device_map="auto",
     )
-    
-    # 3. Load processors
+
+    # 2. Load processors
     vlm_processor = AutoProcessor.from_pretrained(f"{model_path}/vlm_processor")
     llm_tokenizer = AutoTokenizer.from_pretrained(f"{model_path}/llm_tokenizer")
-    
-    # 4. Run inference
+
+    # 3. Run inference
     from PIL import Image
     image = Image.open(image_path).convert("RGB")
-    
+
     print("Generating response...")
     response = model.generate(
         images=image,
         text_prompt=prompt,
         vlm_processor=vlm_processor,
         llm_tokenizer=llm_tokenizer,
-        max_new_tokens=1024
+        max_new_tokens=1024,
     )
-    
+
     print("\n--- Final Response ---")
     print(response)
 
+
 if __name__ == "__main__":
     # Example usage
-    # load_and_run_unified_model("/tmp/my-unified-model", "test_image.jpg", "What is the main subject of this image?")
+    # load_and_run_unified_model("/tmp/my-unified-model", "board-361516_1280.jpg", "What is the main subject of this image?")
     pass
