@@ -44,17 +44,16 @@ def create_and_save_model(save_directory):
             indent=2,
         )
 
-    # ── 2. Copy VLM weights directly from HF cache (BF16, ~8GB) ──────
-    #    No loading into GPU, no save_pretrained — just copy the originals.
-    print(f"Downloading and copying VLM ({vlm_model_id})...")
+    # ── 2. Download VLM, move to dest, delete cache (~8GB) ───────────
+    print(f"Downloading VLM ({vlm_model_id})...")
     vlm_dir = os.path.join(save_directory, "vlm")
-    _copy_from_hf_cache(vlm_model_id, vlm_dir)
+    _download_move_and_cleanup(vlm_model_id, vlm_dir)
 
-    # ── 3. Copy LLM weights directly from HF cache (MXFP4, ~12GB) ────
+    # ── 3. Download LLM, move to dest, delete cache (~14GB) ──────────
     #    Preserves MXFP4 quantized safetensors as-is. No dequantization.
-    print(f"Downloading and copying LLM ({llm_model_id})...")
+    print(f"Downloading LLM ({llm_model_id})...")
     llm_dir = os.path.join(save_directory, "llm")
-    _copy_from_hf_cache(llm_model_id, llm_dir)
+    _download_move_and_cleanup(llm_model_id, llm_dir)
 
     # ── 4. Generate top-level model.safetensors.index.json ────────────
     #    Merges weight maps from vlm/ and llm/ so HuggingFace Hub
@@ -71,6 +70,9 @@ def create_and_save_model(save_directory):
     llm_tokenizer = AutoTokenizer.from_pretrained(llm_model_id)
     llm_tokenizer.save_pretrained(f"{save_directory}/llm_tokenizer")
 
+    # ── 6. Final cache cleanup ────────────────────────────────────────
+    _purge_hf_cache()
+
     # ── Done ──────────────────────────────────────────────────────────
     print(f"\n✓ Manthan-M1 packaged at: {save_directory}")
     _print_repo_size(save_directory)
@@ -79,19 +81,47 @@ def create_and_save_model(save_directory):
     print(f"  2. python test_inference.py")
 
 
-def _copy_from_hf_cache(model_id, dest_dir):
+def _download_move_and_cleanup(model_id, dest_dir):
     """
-    Download model files (or use HF cache) and copy into dest_dir.
-    This preserves the original safetensors exactly as uploaded by the
-    model author — no dequantization, no dtype conversion.
+    Download model files from HF Hub, MOVE (not copy) into dest_dir,
+    then delete the HF cache entry to free disk space immediately.
+    
+    Peak disk usage = 1x model size (download) + 1x model size (move target).
+    But since we move, the cache is freed right after.
     """
+    # Download to HF cache (or use existing cache)
     cache_dir = snapshot_download(model_id)
-
+    
+    # Remove dest if it already exists
     if os.path.exists(dest_dir):
         shutil.rmtree(dest_dir)
+    
+    # MOVE instead of copy — no duplication
+    shutil.move(cache_dir, dest_dir)
+    print(f"  Moved: {cache_dir} -> {dest_dir}")
+    
+    # Clean up any remaining cache artifacts for this model
+    # (the blob store, refs, etc.)
+    _cleanup_hf_cache_for_model(model_id)
 
-    shutil.copytree(cache_dir, dest_dir)
-    print(f"  Copied: {cache_dir} -> {dest_dir}")
+
+def _cleanup_hf_cache_for_model(model_id):
+    """Remove leftover HF cache entries for a specific model."""
+    cache_root = os.path.expanduser("~/.cache/huggingface/hub")
+    # HF cache stores models as models--org--name
+    folder_name = "models--" + model_id.replace("/", "--")
+    cache_model_dir = os.path.join(cache_root, folder_name)
+    if os.path.exists(cache_model_dir):
+        shutil.rmtree(cache_model_dir, ignore_errors=True)
+        print(f"  Cleaned HF cache: {cache_model_dir}")
+
+
+def _purge_hf_cache():
+    """Remove the entire HF cache to reclaim all disk space."""
+    cache_root = os.path.expanduser("~/.cache/huggingface/hub")
+    if os.path.exists(cache_root):
+        shutil.rmtree(cache_root, ignore_errors=True)
+        print("Purged HF cache.")
 
 
 def _print_repo_size(directory):
