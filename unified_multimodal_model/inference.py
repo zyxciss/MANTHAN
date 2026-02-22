@@ -4,17 +4,12 @@ from configuration_unified import UnifiedMultimodalConfig
 from modeling_unified import UnifiedMultimodalModel
 
 def load_and_run_unified_model(model_path, image_path, prompt):
-    # 1. Register custom config and model classes
-    AutoConfig.register("unified_multimodal", UnifiedMultimodalConfig)
-    AutoModelForCausalLM.register(UnifiedMultimodalConfig, UnifiedMultimodalModel)
-    
-    # 2. Load the unified model
+    # 1. Load the unified model directly using the custom class
     print(f"Loading unified model from {model_path}...")
-    model = AutoModelForCausalLM.from_pretrained(
+    model = UnifiedMultimodalModel.from_pretrained(
         model_path, 
         torch_dtype=torch.bfloat16, 
-        device_map="auto", # Automatically distribute across GPUs
-        trust_remote_code=True
+        device_map="auto",
     )
     
     # 3. Load processors
