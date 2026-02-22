@@ -50,10 +50,16 @@ def create_and_save_model(save_directory):
     _download_move_and_cleanup(vlm_model_id, vlm_dir)
 
     # ── 3. Download LLM, move to dest, delete cache (~14GB) ──────────
-    #    Preserves MXFP4 quantized safetensors as-is. No dequantization.
+    #    ONLY download root-level files (safetensors, config, tokenizer).
+    #    Skip metal/ (~13.8GB .bin) and original/ (~13.8GB .safetensors)
+    #    which are alternative format copies we don't need.
     print(f"Downloading LLM ({llm_model_id})...")
     llm_dir = os.path.join(save_directory, "llm")
-    _download_move_and_cleanup(llm_model_id, llm_dir)
+    _download_move_and_cleanup(
+        llm_model_id,
+        llm_dir,
+        ignore_patterns=["metal/*", "original/*"],
+    )
 
     # ── 4. Generate top-level model.safetensors.index.json ────────────
     #    Merges weight maps from vlm/ and llm/ so HuggingFace Hub
@@ -81,27 +87,29 @@ def create_and_save_model(save_directory):
     print(f"  2. python test_inference.py")
 
 
-def _download_move_and_cleanup(model_id, dest_dir):
+def _download_move_and_cleanup(model_id, dest_dir, ignore_patterns=None):
     """
-    Download model files from HF Hub, MOVE (not copy) into dest_dir,
-    then delete the HF cache entry to free disk space immediately.
+    Download only the needed model files from HF Hub, MOVE (not copy)
+    into dest_dir, then delete the HF cache entry to free disk immediately.
     
-    Peak disk usage = 1x model size (download) + 1x model size (move target).
-    But since we move, the cache is freed right after.
+    ignore_patterns: list of glob patterns to skip (e.g., ["metal/*", "original/*"])
     """
-    # Download to HF cache (or use existing cache)
-    cache_dir = snapshot_download(model_id)
-    
+    # Download to HF cache — only the files we actually need
+    kwargs = {}
+    if ignore_patterns:
+        kwargs["ignore_patterns"] = ignore_patterns
+
+    cache_dir = snapshot_download(model_id, **kwargs)
+
     # Remove dest if it already exists
     if os.path.exists(dest_dir):
         shutil.rmtree(dest_dir)
-    
+
     # MOVE instead of copy — no duplication
     shutil.move(cache_dir, dest_dir)
     print(f"  Moved: {cache_dir} -> {dest_dir}")
-    
+
     # Clean up any remaining cache artifacts for this model
-    # (the blob store, refs, etc.)
     _cleanup_hf_cache_for_model(model_id)
 
 
