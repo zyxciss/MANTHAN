@@ -55,10 +55,13 @@ class ManthanM1(nn.Module):
     #     llm_tokenizer/                    <- LLM tokenizer files
 
     def save_pretrained(self, save_directory):
-        """Save Manthan-M1 preserving original weight formats."""
+        """
+        Save Manthan-M1 config. Sub-model weights are copied directly
+        from the HF cache by create_model.py (preserves MXFP4).
+        """
         os.makedirs(save_directory, exist_ok=True)
 
-        # 1. Save unified config
+        # Save unified config
         config_path = os.path.join(save_directory, "config.json")
         with open(config_path, "w") as f:
             json.dump(
@@ -73,23 +76,7 @@ class ManthanM1(nn.Module):
                 indent=2,
             )
 
-        # 2. Save VLM in its native format
-        vlm_dir = os.path.join(save_directory, "vlm")
-        print(f"Saving VLM to {vlm_dir} ...")
-        self.vlm.save_pretrained(vlm_dir, safe_serialization=True)
-
-        # 3. Save LLM in its native format (preserves MXFP4 quantization)
-        llm_dir = os.path.join(save_directory, "llm")
-        print(f"Saving LLM to {llm_dir} ...")
-        self.llm.save_pretrained(llm_dir, safe_serialization=True)
-
-        # 4. Generate top-level model.safetensors.index.json
-        #    This merges the weight maps from vlm/ and llm/ so that
-        #    HuggingFace Hub correctly reports the total parameter count.
-        print("Generating top-level model.safetensors.index.json ...")
-        self._generate_merged_index(save_directory)
-
-        print(f"Saved Manthan-M1 to {save_directory}")
+        print(f"Saved Manthan-M1 config to {save_directory}")
 
     @staticmethod
     def _generate_merged_index(save_directory):

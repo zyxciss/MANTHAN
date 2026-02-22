@@ -1,7 +1,9 @@
+import json
 import os
 import shutil
 import torch
-from transformers import AutoConfig, AutoModelForCausalLM, AutoModel, AutoProcessor, AutoTokenizer
+from transformers import AutoConfig, AutoProcessor, AutoTokenizer
+from huggingface_hub import snapshot_download
 from configuration_unified import ManthanM1Config
 from modeling_unified import ManthanM1
 
@@ -10,27 +12,10 @@ def create_and_save_model(save_directory):
     vlm_model_id = "Qwen/Qwen3-VL-4B-Instruct"
     llm_model_id = "openai/gpt-oss-20b"
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Using device: {device}")
+    os.makedirs(save_directory, exist_ok=True)
 
-    # ── 1. Load VLM (BF16, ~8GB) ─────────────────────────────────────
-    print("Loading VLM weights...")
-    try:
-        vlm = AutoModelForCausalLM.from_pretrained(
-            vlm_model_id, torch_dtype=torch.bfloat16, device_map=device
-        )
-    except ValueError:
-        vlm = AutoModel.from_pretrained(
-            vlm_model_id, torch_dtype=torch.bfloat16, device_map=device
-        )
-
-    # ── 2. Load LLM (MXFP4 native, ~12GB) ────────────────────────────
-    print("Loading LLM weights...")
-    llm = AutoModelForCausalLM.from_pretrained(
-        llm_model_id, torch_dtype=torch.bfloat16, device_map=device
-    )
-
-    # ── 3. Build Manthan-M1 config ────────────────────────────────────
+    # ── 1. Build Manthan-M1 config ────────────────────────────────────
+    print("Fetching sub-model configs...")
     vlm_config = AutoConfig.from_pretrained(vlm_model_id)
     llm_config = AutoConfig.from_pretrained(llm_model_id)
 
@@ -44,22 +29,40 @@ def create_and_save_model(save_directory):
         ),
     )
 
-    # ── 4. Create wrapper and save ────────────────────────────────────
-    model = ManthanM1(vlm=vlm, llm=llm, config=config)
-    model.save_pretrained(save_directory)
+    # Save unified config
+    config_path = os.path.join(save_directory, "config.json")
+    with open(config_path, "w") as f:
+        json.dump(
+            {
+                "model_type": config.model_type,
+                "architectures": ["ManthanM1"],
+                "vlm_config": config.vlm_config,
+                "llm_config": config.llm_config,
+                "vlm_system_prompt": config.vlm_system_prompt,
+            },
+            f,
+            indent=2,
+        )
 
-    # ── 5. Copy original LLM safetensors to preserve MXFP4 ───────────
-    #    save_pretrained above may dequantize MXFP4 → BF16 when saving.
-    #    Overwrite with the original HF cache files to keep ~12GB.
-    print("Copying original MXFP4 LLM weights from HF cache...")
+    # ── 2. Copy VLM weights directly from HF cache (BF16, ~8GB) ──────
+    #    No loading into GPU, no save_pretrained — just copy the originals.
+    print(f"Downloading and copying VLM ({vlm_model_id})...")
+    vlm_dir = os.path.join(save_directory, "vlm")
+    _copy_from_hf_cache(vlm_model_id, vlm_dir)
+
+    # ── 3. Copy LLM weights directly from HF cache (MXFP4, ~12GB) ────
+    #    Preserves MXFP4 quantized safetensors as-is. No dequantization.
+    print(f"Downloading and copying LLM ({llm_model_id})...")
     llm_dir = os.path.join(save_directory, "llm")
-    _copy_original_hf_files(llm_model_id, llm_dir)
+    _copy_from_hf_cache(llm_model_id, llm_dir)
 
-    # ── 6. Re-generate the merged index after copying originals ───────
-    print("Re-generating top-level model.safetensors.index.json ...")
+    # ── 4. Generate top-level model.safetensors.index.json ────────────
+    #    Merges weight maps from vlm/ and llm/ so HuggingFace Hub
+    #    correctly reports the total parameter count (~24B).
+    print("Generating top-level model.safetensors.index.json ...")
     ManthanM1._generate_merged_index(save_directory)
 
-    # ── 7. Save processors / tokenizers ───────────────────────────────
+    # ── 5. Save processors / tokenizers ───────────────────────────────
     print("Saving VLM processor...")
     vlm_processor = AutoProcessor.from_pretrained(vlm_model_id)
     vlm_processor.save_pretrained(f"{save_directory}/vlm_processor")
@@ -68,23 +71,27 @@ def create_and_save_model(save_directory):
     llm_tokenizer = AutoTokenizer.from_pretrained(llm_model_id)
     llm_tokenizer.save_pretrained(f"{save_directory}/llm_tokenizer")
 
-    print(f"\n✓ Manthan-M1 saved to: {save_directory}")
+    # ── Done ──────────────────────────────────────────────────────────
+    print(f"\n✓ Manthan-M1 packaged at: {save_directory}")
     _print_repo_size(save_directory)
     print("\nNext steps:")
-    print(f"  1. cd {save_directory}")
-    print(f"  2. huggingface-cli upload <your-username>/Manthan-M1 . .")
+    print(f"  1. huggingface-cli upload <your-username>/Manthan-M1 {save_directory} .")
+    print(f"  2. python test_inference.py")
 
 
-def _copy_original_hf_files(model_id, dest_dir):
-    """Copy original safetensors from HF cache, preserving MXFP4."""
-    from huggingface_hub import snapshot_download
+def _copy_from_hf_cache(model_id, dest_dir):
+    """
+    Download model files (or use HF cache) and copy into dest_dir.
+    This preserves the original safetensors exactly as uploaded by the
+    model author — no dequantization, no dtype conversion.
+    """
     cache_dir = snapshot_download(model_id)
 
     if os.path.exists(dest_dir):
         shutil.rmtree(dest_dir)
 
     shutil.copytree(cache_dir, dest_dir)
-    print(f"  Copied original weights from {cache_dir} -> {dest_dir}")
+    print(f"  Copied: {cache_dir} -> {dest_dir}")
 
 
 def _print_repo_size(directory):
