@@ -25,7 +25,7 @@ AutoConfig.register("unified_multimodal", UnifiedMultimodalConfig)
 AutoModelForCausalLM.register(UnifiedMultimodalConfig, UnifiedMultimodalModel)
 
 # 2. Load model and processors
-model_path = "./my-unified-model"
+model_path = "/tmp/my-unified-model"
 model = AutoModelForCausalLM.from_pretrained(
     model_path, 
     torch_dtype=torch.bfloat16, 

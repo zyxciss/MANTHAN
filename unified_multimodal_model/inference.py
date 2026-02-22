@@ -39,5 +39,5 @@ def load_and_run_unified_model(model_path, image_path, prompt):
 
 if __name__ == "__main__":
     # Example usage
-    # load_and_run_unified_model("./my-unified-model", "test_image.jpg", "What is the main subject of this image?")
+    # load_and_run_unified_model("/tmp/my-unified-model", "test_image.jpg", "What is the main subject of this image?")
     pass
