@@ -1,8 +1,8 @@
-import os
 from transformers import PretrainedConfig
 
-class UnifiedMultimodalConfig(PretrainedConfig):
-    model_type = "unified_multimodal"
+
+class ManthanM1Config(PretrainedConfig):
+    model_type = "manthan_m1"
 
     def __init__(
         self,

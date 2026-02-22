@@ -1,6 +1,6 @@
-# Unified Multimodal Model
+# Manthan-M1
 
-A unified multimodal model that combines a Vision-Language Model (VLM) and a Large Language Model (LLM) into a single `nn.Module` with a unified `generate()` interface.
+A unified multimodal model (~24B parameters) that combines a Vision-Language Model and a Large Language Model into a single `nn.Module` with a unified `generate()` interface.
 
 **No training, no fine-tuning, no projector alignment.**
 
@@ -10,17 +10,18 @@ Two-stage pipeline wrapped as a single model:
 1. **Vision Module** — `Qwen/Qwen3-VL-4B-Instruct` (BF16, ~8GB) converts image → structured text
 2. **Reasoning Module** — `openai/gpt-oss-20b` (MXFP4 quantized, ~12GB) reasons over structured text + user prompt
 
-Total repo size: ~20GB (preserving original MXFP4 quantization, NOT dequantized to BF16)
+Total repo size: ~20GB (MXFP4 preserved, not dequantized)
 
 ## Repository Layout
 
 ```
-my-unified-model/
-├── config.json              # Unified config (references both sub-models)
-├── vlm/                     # VLM weights + config (BF16 safetensors)
-├── llm/                     # LLM weights + config (MXFP4 safetensors, native)
-├── vlm_processor/           # VLM processor (tokenizer + image processor)
-└── llm_tokenizer/           # LLM tokenizer
+Manthan-M1/
+├── config.json                       # Unified Manthan-M1 config
+├── model.safetensors.index.json      # Merged weight map (HF shows ~24B params)
+├── vlm/                              # VLM weights + config (BF16 safetensors)
+├── llm/                              # LLM weights + config (MXFP4 safetensors)
+├── vlm_processor/                    # VLM processor (tokenizer + image processor)
+└── llm_tokenizer/                    # LLM tokenizer
 ```
 
 ## Usage
@@ -29,18 +30,18 @@ my-unified-model/
 import torch
 from transformers import AutoProcessor, AutoTokenizer
 from PIL import Image
-from modeling_unified import UnifiedMultimodalModel
+from modeling_unified import ManthanM1
 
-# 1. Load unified model (one call, handles both sub-models)
-model = UnifiedMultimodalModel.from_pretrained(
-    "/tmp/my-unified-model",
+# 1. Load Manthan-M1 (one call, handles both sub-models)
+model = ManthanM1.from_pretrained(
+    "/tmp/Manthan-M1",
     dtype=torch.bfloat16,
     device_map="auto",
 )
 
 # 2. Load processors
-vlm_processor = AutoProcessor.from_pretrained("/tmp/my-unified-model/vlm_processor")
-llm_tokenizer = AutoTokenizer.from_pretrained("/tmp/my-unified-model/llm_tokenizer")
+vlm_processor = AutoProcessor.from_pretrained("/tmp/Manthan-M1/vlm_processor")
+llm_tokenizer = AutoTokenizer.from_pretrained("/tmp/Manthan-M1/llm_tokenizer")
 
 # 3. Single generate() call — no visible intermediate steps
 image = Image.open("test_image.jpg").convert("RGB")
@@ -56,13 +57,20 @@ response = model.generate(
 print(response)
 ```
 
-## Creating the Model
+## Workflow
 
+### Step 1: Create the model
 ```bash
 python create_model.py
 ```
+This downloads both models, packages them into `/tmp/Manthan-M1`, preserves MXFP4 quantization, and generates a merged `model.safetensors.index.json` for correct HF parameter count.
 
-This will:
-1. Download both models from HuggingFace
-2. Package them into a single unified repo at `/tmp/my-unified-model`
-3. Preserve the LLM's MXFP4 quantization (no weight bloat)
+### Step 2: Upload to HuggingFace
+```bash
+huggingface-cli upload <your-username>/Manthan-M1 /tmp/Manthan-M1 .
+```
+
+### Step 3: Test inference
+```bash
+python test_inference.py
+```

@@ -2,11 +2,11 @@ import os
 import shutil
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM, AutoModel, AutoProcessor, AutoTokenizer
-from configuration_unified import UnifiedMultimodalConfig
-from modeling_unified import UnifiedMultimodalModel
+from configuration_unified import ManthanM1Config
+from modeling_unified import ManthanM1
 
 
-def create_and_save_unified_model(save_directory):
+def create_and_save_model(save_directory):
     vlm_model_id = "Qwen/Qwen3-VL-4B-Instruct"
     llm_model_id = "openai/gpt-oss-20b"
 
@@ -25,19 +25,16 @@ def create_and_save_unified_model(save_directory):
         )
 
     # ── 2. Load LLM (MXFP4 native, ~12GB) ────────────────────────────
-    #    Let from_pretrained handle MXFP4 natively. If Triton is missing,
-    #    it will dequant to BF16 at runtime, but we save the original
-    #    MXFP4 safetensors as-is below.
     print("Loading LLM weights...")
     llm = AutoModelForCausalLM.from_pretrained(
         llm_model_id, torch_dtype=torch.bfloat16, device_map=device
     )
 
-    # ── 3. Build unified config ───────────────────────────────────────
+    # ── 3. Build Manthan-M1 config ────────────────────────────────────
     vlm_config = AutoConfig.from_pretrained(vlm_model_id)
     llm_config = AutoConfig.from_pretrained(llm_model_id)
 
-    unified_config = UnifiedMultimodalConfig(
+    config = ManthanM1Config(
         vlm_config=vlm_config.to_dict(),
         llm_config=llm_config.to_dict(),
         vlm_system_prompt=(
@@ -48,19 +45,21 @@ def create_and_save_unified_model(save_directory):
     )
 
     # ── 4. Create wrapper and save ────────────────────────────────────
-    #    Each sub-model is saved in its native format inside the repo.
-    #    The LLM's MXFP4 quantized safetensors are preserved as-is.
-    unified_model = UnifiedMultimodalModel(vlm=vlm, llm=llm, config=unified_config)
-    unified_model.save_pretrained(save_directory)
+    model = ManthanM1(vlm=vlm, llm=llm, config=config)
+    model.save_pretrained(save_directory)
 
-    # ── 5. Also copy original LLM safetensors to preserve MXFP4 ──────
-    #    The save_pretrained above may have dequantized. Let's overwrite
-    #    the LLM directory with the original HF cache files.
+    # ── 5. Copy original LLM safetensors to preserve MXFP4 ───────────
+    #    save_pretrained above may dequantize MXFP4 → BF16 when saving.
+    #    Overwrite with the original HF cache files to keep ~12GB.
     print("Copying original MXFP4 LLM weights from HF cache...")
     llm_dir = os.path.join(save_directory, "llm")
     _copy_original_hf_files(llm_model_id, llm_dir)
 
-    # ── 6. Save processors / tokenizers ───────────────────────────────
+    # ── 6. Re-generate the merged index after copying originals ───────
+    print("Re-generating top-level model.safetensors.index.json ...")
+    ManthanM1._generate_merged_index(save_directory)
+
+    # ── 7. Save processors / tokenizers ───────────────────────────────
     print("Saving VLM processor...")
     vlm_processor = AutoProcessor.from_pretrained(vlm_model_id)
     vlm_processor.save_pretrained(f"{save_directory}/vlm_processor")
@@ -69,24 +68,21 @@ def create_and_save_unified_model(save_directory):
     llm_tokenizer = AutoTokenizer.from_pretrained(llm_model_id)
     llm_tokenizer.save_pretrained(f"{save_directory}/llm_tokenizer")
 
-    print(f"\nDone! Unified model saved to: {save_directory}")
+    print(f"\n✓ Manthan-M1 saved to: {save_directory}")
     _print_repo_size(save_directory)
+    print("\nNext steps:")
+    print(f"  1. cd {save_directory}")
+    print(f"  2. huggingface-cli upload <your-username>/Manthan-M1 . .")
 
 
 def _copy_original_hf_files(model_id, dest_dir):
-    """
-    Copy the original safetensors + config from HF cache into dest_dir,
-    preserving MXFP4 quantized weights without dequantization.
-    """
+    """Copy original safetensors from HF cache, preserving MXFP4."""
     from huggingface_hub import snapshot_download
-    # Download (or use cache) and get the local path
     cache_dir = snapshot_download(model_id)
-    
-    # Remove the save_pretrained output (dequantized) and replace
+
     if os.path.exists(dest_dir):
         shutil.rmtree(dest_dir)
-    
-    # Copy the original files
+
     shutil.copytree(cache_dir, dest_dir)
     print(f"  Copied original weights from {cache_dir} -> {dest_dir}")
 
@@ -102,4 +98,4 @@ def _print_repo_size(directory):
 
 
 if __name__ == "__main__":
-    create_and_save_unified_model("/tmp/my-unified-model")
+    create_and_save_model("/tmp/Manthan-M1")

@@ -1,12 +1,12 @@
 import torch
 from transformers import AutoProcessor, AutoTokenizer
-from modeling_unified import UnifiedMultimodalModel
+from modeling_unified import ManthanM1
 
 
-def load_and_run_unified_model(model_path, image_path, prompt):
-    # 1. Load the unified model (reads config.json + model.safetensors)
-    print(f"Loading unified model from {model_path}...")
-    model = UnifiedMultimodalModel.from_pretrained(
+def load_and_run(model_path, image_path, prompt):
+    # 1. Load Manthan-M1 (reads config.json, loads vlm/ and llm/ sub-models)
+    print(f"Loading Manthan-M1 from {model_path}...")
+    model = ManthanM1.from_pretrained(
         model_path,
         dtype=torch.bfloat16,
         device_map="auto",
@@ -16,7 +16,7 @@ def load_and_run_unified_model(model_path, image_path, prompt):
     vlm_processor = AutoProcessor.from_pretrained(f"{model_path}/vlm_processor")
     llm_tokenizer = AutoTokenizer.from_pretrained(f"{model_path}/llm_tokenizer")
 
-    # 3. Run inference
+    # 3. Run inference — single generate() call
     from PIL import Image
     image = Image.open(image_path).convert("RGB")
 
@@ -29,11 +29,9 @@ def load_and_run_unified_model(model_path, image_path, prompt):
         max_new_tokens=1024,
     )
 
-    print("\n--- Final Response ---")
+    print("\n--- Manthan-M1 Response ---")
     print(response)
 
 
 if __name__ == "__main__":
-    # Example usage
-    # load_and_run_unified_model("/tmp/my-unified-model", "board-361516_1280.jpg", "What is the main subject of this image?")
     pass
