@@ -1,5 +1,5 @@
 import torch
-from transformers import AutoConfig, AutoModelForCausalLM, AutoProcessor, AutoTokenizer
+from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForVision2Seq, AutoProcessor, AutoTokenizer
 from configuration_unified import UnifiedMultimodalConfig
 from modeling_unified import UnifiedMultimodalModel
 
@@ -25,7 +25,7 @@ def create_and_save_unified_model(save_directory):
     # Note: This requires downloading the weights of both models.
     # For a 20B model, this requires significant RAM.
     print("Loading VLM weights...")
-    unified_model.vlm = AutoModelForCausalLM.from_pretrained(vlm_model_id, torch_dtype=torch.bfloat16)
+    unified_model.vlm = AutoModelForVision2Seq.from_pretrained(vlm_model_id, torch_dtype=torch.bfloat16)
     
     print("Loading LLM weights...")
     unified_model.llm = AutoModelForCausalLM.from_pretrained(llm_model_id, torch_dtype=torch.bfloat16)

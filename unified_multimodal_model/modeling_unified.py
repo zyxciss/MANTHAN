@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from transformers import PreTrainedModel, AutoModelForCausalLM, AutoProcessor, AutoTokenizer, AutoConfig
+from transformers import PreTrainedModel, AutoModelForCausalLM, AutoModelForVision2Seq, AutoProcessor, AutoTokenizer, AutoConfig
 from configuration_unified import UnifiedMultimodalConfig
 
 class UnifiedMultimodalModel(PreTrainedModel):
@@ -13,7 +13,7 @@ class UnifiedMultimodalModel(PreTrainedModel):
         # Note: In a real scenario, you might load these from sub-configs or paths
         # For packaging, we assume the weights are stored in the same repo or downloaded
         vlm_cfg = AutoConfig.for_model(**config.vlm_config) if config.vlm_config else None
-        self.vlm = AutoModelForCausalLM.from_config(vlm_cfg) if vlm_cfg else None
+        self.vlm = AutoModelForVision2Seq.from_config(vlm_cfg) if vlm_cfg else None
         
         # Initialize LLM (gpt-oss-20b)
         llm_cfg = AutoConfig.for_model(**config.llm_config) if config.llm_config else None
