@@ -163,7 +163,7 @@ class ManthanM1(nn.Module):
         llm_dir = os.path.join(save_directory, "llm")
         print(f"Loading LLM from {llm_dir} ...")
         llm = AutoModelForCausalLM.from_pretrained(
-            llm_dir, torch_dtype=dtype, device_map=device_map
+            llm_dir, dtype=dtype, device_map=device_map
         )
 
         # 4. Build the unified wrapper
@@ -198,6 +198,8 @@ class ManthanM1(nn.Module):
         device = next(self.vlm.parameters()).device
 
         # ── Stage 1: VLM Image Understanding ──────────────────────────
+        #    Disable thinking mode (enable_thinking=False) to skip the
+        #    internal chain-of-thought and get a direct description.
         vlm_messages = [
             {"role": "system", "content": self.vlm_system_prompt},
             {
@@ -210,7 +212,10 @@ class ManthanM1(nn.Module):
         ]
 
         vlm_text = vlm_processor.apply_chat_template(
-            vlm_messages, tokenize=False, add_generation_prompt=True
+            vlm_messages,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False,
         )
         vlm_inputs = vlm_processor(
             text=[vlm_text], images=[images], padding=True, return_tensors="pt"
@@ -230,31 +235,44 @@ class ManthanM1(nn.Module):
         print(f"[VLM Description] {image_description[:200]}...")
 
         # ── Stage 2: LLM Reasoning ───────────────────────────────────
+        #    Use the LLM's own chat template (harmony format for gpt-oss)
+        #    via apply_chat_template. Set reasoning to "low" in the system
+        #    prompt for faster responses — this avoids the long internal
+        #    chain-of-thought that was taking most of the generation time.
         llm_device = next(self.llm.parameters()).device
 
-        llm_prompt = (
-            "<|im_start|>system\n"
-            "You are a highly capable AI assistant. You have been provided "
-            "with a detailed description of an image. Use this description "
-            "to answer the user's request.\n"
-            "<|im_end|>\n"
-            "<|im_start|>user\n"
-            "[Image Description]\n"
-            f"{image_description}\n\n"
-            "[User Request]\n"
-            f"{text_prompt}\n"
-            "<|im_end|>\n"
-            "<|im_start|>assistant\n"
-        )
+        llm_messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Reasoning: low\n\n"
+                    "You are a highly capable AI assistant. You have been provided "
+                    "with a detailed description of an image. Use this description "
+                    "to answer the user's request directly and concisely."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"[Image Description]\n{image_description}\n\n"
+                    f"[User Request]\n{text_prompt}"
+                ),
+            },
+        ]
 
-        llm_inputs = llm_tokenizer(llm_prompt, return_tensors="pt").to(llm_device)
+        llm_inputs = llm_tokenizer.apply_chat_template(
+            llm_messages,
+            add_generation_prompt=True,
+            return_tensors="pt",
+            return_dict=True,
+        ).to(llm_device)
 
         llm_outputs = self.llm.generate(
             **llm_inputs, max_new_tokens=max_new_tokens, **kwargs
         )
 
         final_response = llm_tokenizer.decode(
-            llm_outputs[0][llm_inputs.input_ids.shape[1] :],
+            llm_outputs[0][llm_inputs["input_ids"].shape[1] :],
             skip_special_tokens=True,
         )
 
