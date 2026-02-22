@@ -5,6 +5,8 @@ from configuration_unified import UnifiedMultimodalConfig
 
 class UnifiedMultimodalModel(PreTrainedModel):
     config_class = UnifiedMultimodalConfig
+    _tied_weights_keys = []
+    all_tied_weights_keys = []
     
     def __init__(self, config):
         super().__init__(config)
@@ -39,7 +41,12 @@ class UnifiedMultimodalModel(PreTrainedModel):
 
     @property
     def all_tied_weights_keys(self):
-        return self._tied_weights_keys
+        keys = []
+        if self.vlm and hasattr(self.vlm, "all_tied_weights_keys"):
+            keys.extend([f"vlm.{k}" for k in self.vlm.all_tied_weights_keys])
+        if self.llm and hasattr(self.llm, "all_tied_weights_keys"):
+            keys.extend([f"llm.{k}" for k in self.llm.all_tied_weights_keys])
+        return keys
 
     def forward(self, *args, **kwargs):
         # Forward pass is usually for training, which we aren't doing.
