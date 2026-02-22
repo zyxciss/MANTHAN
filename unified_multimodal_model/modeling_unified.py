@@ -15,7 +15,11 @@ class UnifiedMultimodalModel(PreTrainedModel):
         vlm_cfg = AutoConfig.for_model(**config.vlm_config) if config.vlm_config else None
         
         # Qwen-VL models are typically loaded with AutoModelForCausalLM in transformers
-        self.vlm = AutoModelForCausalLM.from_config(vlm_cfg) if vlm_cfg else None
+        # If it fails with AutoModelForCausalLM, we can try AutoModel
+        try:
+            self.vlm = AutoModelForCausalLM.from_config(vlm_cfg) if vlm_cfg else None
+        except ValueError:
+            self.vlm = AutoModel.from_config(vlm_cfg) if vlm_cfg else None
         
         # Initialize LLM (gpt-oss-20b)
         llm_cfg = AutoConfig.for_model(**config.llm_config) if config.llm_config else None
