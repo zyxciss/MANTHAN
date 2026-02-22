@@ -105,12 +105,35 @@ def _download_move_and_cleanup(model_id, dest_dir, ignore_patterns=None):
     if os.path.exists(dest_dir):
         shutil.rmtree(dest_dir)
 
-    # MOVE instead of copy — no duplication
+    # HF cache stores files as symlinks (snapshots/<rev>/file -> blobs/<hash>).
+    # We must resolve them into real files BEFORE deleting the cache,
+    # otherwise the symlinks become dangling.
+    _resolve_symlinks(cache_dir)
+
+    # MOVE instead of copy — no duplication after resolving symlinks
     shutil.move(cache_dir, dest_dir)
     print(f"  Moved: {cache_dir} -> {dest_dir}")
 
     # Clean up any remaining cache artifacts for this model
     _cleanup_hf_cache_for_model(model_id)
+
+
+def _resolve_symlinks(directory):
+    """
+    Walk *directory* and replace every symlink with a real copy of its target.
+
+    HuggingFace's cache layout is:
+        snapshots/<revision>/<file>  →  ../../blobs/<sha256>
+    After resolving, the snapshot directory is self-contained and safe to
+    move even after the blobs directory is deleted.
+    """
+    for dirpath, dirnames, filenames in os.walk(directory):
+        for name in filenames:
+            fpath = os.path.join(dirpath, name)
+            if os.path.islink(fpath):
+                real = os.path.realpath(fpath)
+                os.remove(fpath)           # delete the symlink
+                shutil.copy2(real, fpath)   # copy real file in its place
 
 
 def _cleanup_hf_cache_for_model(model_id):
