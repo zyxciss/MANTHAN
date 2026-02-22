@@ -37,6 +37,10 @@ class UnifiedMultimodalModel(PreTrainedModel):
             keys.extend([f"llm.{k}" for k in self.llm._tied_weights_keys])
         return keys
 
+    @property
+    def all_tied_weights_keys(self):
+        return self._tied_weights_keys
+
     def forward(self, *args, **kwargs):
         # Forward pass is usually for training, which we aren't doing.
         # We can implement a dummy forward or raise NotImplementedError
