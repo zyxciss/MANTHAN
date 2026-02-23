@@ -1,8 +1,10 @@
 # Manthan-M1
 
-A unified multimodal model (~24B parameters) that combines a Vision-Language Model and a Large Language Model into a single `nn.Module` with a unified `generate()` interface.
+> *"Manthan" means churning — here it represents the churning of thoughts to produce deep, structured, and clear reasoning.*
 
-**No training, no fine-tuning, no projector alignment.**
+**Manthan-M1** is the first generation of the Manthan reasoning model (~25B parameters). It combines a Vision-Language Model and a Large Language Model into a single `nn.Module` with a unified `generate()` interface.
+
+Built by an independent developer — **no training, no fine-tuning, no projector alignment.**
 
 ## Architecture
 
