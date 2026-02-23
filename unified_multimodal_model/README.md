@@ -28,13 +28,15 @@ Manthan-M1/
 
 ## Usage
 
+### Image + Text (multimodal)
+
 ```python
 import torch
 from transformers import AutoProcessor, AutoTokenizer
 from PIL import Image
 from modeling_unified import ManthanM1
 
-# 1. Load Manthan-M1 (one call, handles both sub-models)
+# 1. Load Manthan-M1
 model = ManthanM1.from_pretrained(
     "/tmp/Manthan-M1",
     dtype=torch.bfloat16,
@@ -45,7 +47,7 @@ model = ManthanM1.from_pretrained(
 vlm_processor = AutoProcessor.from_pretrained("/tmp/Manthan-M1/vlm_processor")
 llm_tokenizer = AutoTokenizer.from_pretrained("/tmp/Manthan-M1/llm_tokenizer")
 
-# 3. Single generate() call — no visible intermediate steps
+# 3. Generate — VLM processes image, LLM reasons over description + prompt
 image = Image.open("test_image.jpg").convert("RGB")
 
 response = model.generate(
@@ -55,7 +57,17 @@ response = model.generate(
     llm_tokenizer=llm_tokenizer,
     max_new_tokens=1024,
 )
+print(response)
+```
 
+### Text-only (no image, VLM is skipped entirely)
+
+```python
+response = model.generate(
+    text_prompt="Explain quantum entanglement in simple terms.",
+    llm_tokenizer=llm_tokenizer,
+    max_new_tokens=1024,
+)
 print(response)
 ```
 
